@@ -42,6 +42,35 @@ public:
 				break;
 		}
 	}
+	
+	//按照printf的格式打印字符串
+	template<typename... Args>
+	static const string generateFormattedString(string source, Args... args) {
+		char buffer[4096];
+		sprintf_s(buffer, 4096, source.c_str(), args...);
+		return string(buffer);
+	}
+
+	//把所有pair.first替换成pair.second
+	static const string replaceSubString(string source, vector<pair<string, string> > replace) {
+		string dest;
+
+		for (pair<string, string> i : replace) {
+			dest = ""s;
+			for (int j = 0; j < source.size();) {
+				if (source.substr(j, i.first.size()) == i.first) {
+					j += i.first.size();
+					dest += i.second;
+				}
+				else {
+					dest += source[j];
+					j++;
+				}
+			}
+			source = dest;
+		}
+		return source;
+	}
 
 	//将各种整数/浮点数转换为字符串
 	//或者考虑std::to_string()??? 

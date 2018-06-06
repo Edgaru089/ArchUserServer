@@ -179,6 +179,10 @@ public:
 
 	void processConfig() {
 		port = StringParser::toInt(option.getContent("port"));
+		if (option.getContent("autosave-duration") != "0")
+			autosaveTime = seconds(StringParser::toFloat(option.getContent("autosave-duration")));
+		else
+			autosaveTime = Time::Zero;
 	}
 
 	const bool saveConfig(string filename) {
@@ -255,6 +259,7 @@ public:
 	}
 
 	const unsigned short int getPort() { return port; }
+	const Time getAutosaveTime() { return autosaveTime; }
 
 private:
 	string configFilename;
@@ -262,6 +267,8 @@ private:
 	OptionFile option;
 
 	Thread listen, seekAndRemove;
+
+	Time autosaveTime;
 
 	bool isRunning, isListening;
 	Uint16 port;
