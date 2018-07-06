@@ -148,7 +148,7 @@ public:
 					ret << m.size();
 					for (auto& i : m)
 						ret << i.first << i.second << service->getSessionHandler().getSessionNoGenerate(i.first);
-					mlog << "[NetworkHandler] Users listed by administrative session" << dlog;
+					//mlog << "[NetworkHandler] Users listed by administrative session" << dlog;
 				}
 				else
 					ret << "ADMINFAILED";
