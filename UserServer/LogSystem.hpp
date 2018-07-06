@@ -11,7 +11,7 @@ using namespace std;
 class Log {
 public:
 
-	const string logLevelName[4] = { "INFO","WARN"," ERR", "FATAL ERROR" };
+	const string logLevelName[4] = { "INFO", "WARN", " ERR", "FATAL ERROR" };
 
 	enum LogLevel {
 		Info,
@@ -56,7 +56,7 @@ private:
 	recursive_mutex lock;
 };
 
-Log defLog;
+Log dlog;
 
 class LogMessage {
 public:

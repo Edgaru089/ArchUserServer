@@ -15,9 +15,12 @@ using namespace sf;
 
 class ServerNetworkHandler {
 public:
-	ServerNetworkHandler():commandLoop(&ServerNetworkHandler::processCommandLoop, this) {}
+	ServerNetworkHandler() :commandLoop(&ServerNetworkHandler::processCommandLoop, this) {}
 
-	const bool listen(int port, UserServiceHandler& service) {
+	const bool listen(int port, UserServiceHandler& service, string adminPassHashed) {
+		this->adminPassHashed = adminPassHashed;
+		isAdmin = false;
+
 		listening = true;
 		TcpListener listener;
 
@@ -25,9 +28,9 @@ public:
 		listener.setBlocking(false);
 		listener.listen(port);
 
-		while(listener.accept(mainSocket) != Socket::Done && listening) { sleep(milliseconds(50)); }
+		while (listener.accept(mainSocket) != Socket::Done && listening) { sleep(milliseconds(50)); }
 
-		if(listening) {
+		if (listening) {
 			listening = false;
 			connected = true;
 			this->service = &service;
@@ -40,21 +43,23 @@ public:
 		}
 	}
 
+#define BEGIN_IF_COMMAND(str) if(command == str)
+#define IF_COMMAND(str) else if(command == str)
 	void processCommandLoop() {
 		Packet pack;
-		while(connected&&mainSocket.receive(pack) != Socket::Disconnected) {
+		while (connected&&mainSocket.receive(pack) != Socket::Disconnected) {
 			string command;
 			pack >> command;
-			if(command == "HELLO") {
+			BEGIN_IF_COMMAND("HELLO") {
 				Packet out;
 				out << "HELLO";
 				mainSocket.send(out);
 			}
-			else if(command == "LOGIN") {
+			IF_COMMAND("LOGIN") {
 				string username, passwordHashed;
 				pair<bool, string> status;
 				pack >> username >> passwordHashed;
-				if((status = service->userLogin(User(username, passwordHashed))).first) {
+				if ((status = service->userLogin(username, passwordHashed)).first) {
 					Packet out;
 					out << "SESSIONPASS" << true << status.second;
 					mainSocket.send(out);
@@ -65,58 +70,177 @@ public:
 					mainSocket.send(out);
 				}
 			}
-			else if(command == "LOGOUT") {
+			IF_COMMAND("LOGOUT") {
 				string username, passwordHashed;
 				pack >> username >> passwordHashed;
 				Packet pack;
-				if(service->userLogout(User(username, passwordHashed)))
+				if (service->checkUserCredentials(username, passwordHashed) && service->userLogout(username))
 					pack << "LOGOUTSUCCESS";
 				else
 					pack << "LOGOUTFAILURE";
 				mainSocket.send(pack);
 			}
-			else if(command == "CHECKSESSION") {
+			IF_COMMAND("CHECKSESSION") {
 				string username, session;
 				pack >> username, session;
 				Packet out;
-				if(service->checkUserSession(username, session))
+				if (service->checkUserSession(username, session))
 					out << "SESSIONVAILD";
 				else
 					out << "SESSIONINVAILD";
 				mainSocket.send(out);
 			}
-			else if(command == "CHECKUSER") {
+			IF_COMMAND("CHECKUSER") {
 				string username, passwordHashed;
 				pack >> username, passwordHashed;
 				Packet out;
-				if(service->checkUserSession(username, passwordHashed))
+				if (service->checkUserCredentials(username, passwordHashed))
 					out << "USERVAILD";
 				else
 					out << "USERINVAILD";
 				mainSocket.send(out);
 			}
-			else if(command == "CREATE") {
+			IF_COMMAND("CREATE") {
 				string username, passwordHashed;
 				pack >> username >> passwordHashed;
 				Packet pack;
-				if(service->createUser(username, passwordHashed))
+				if (service->createUser(username, passwordHashed))
 					pack << "CREATESUCCESS";
 				else
 					pack << "CREATEFAILURE";
 				mainSocket.send(pack);
 			}
-			else if(command == "DELETE") {
+			IF_COMMAND("DELETE") {
 				string username, passwordHashed;
 				pack >> username >> passwordHashed;
 				Packet pack;
-				if(service->deleteUser(User(username, passwordHashed)))
+				if (service->checkUserCredentials(username, passwordHashed) && service->deleteUser(username))
 					pack << "DELETESUCCESS";
 				else
 					pack << "DELETEFAILURE";
 				mainSocket.send(pack);
 			}
+
+			/* ---------- Administrative Commands ---------- */
+			IF_COMMAND("ADMINLOGIN") {
+				string pass;
+				Packet ret;
+				pack >> pass;
+				if (pass == adminPassHashed) {
+					isAdmin = true;
+					ret << "ADMINOK";
+					mlog << "[NetworkHandler] Administrative user logged in from " <<
+						mainSocket.getRemoteAddress().toString() << ":" << mainSocket.getRemotePort() << dlog;
+				}
+				else {
+					ret << "ADMINFAILED";
+					mlog << "[NetworkHandler] Failed Administrative login attempt from " <<
+						mainSocket.getRemoteAddress().toString() << ":" << mainSocket.getRemotePort();
+					mlog << "                 with hashed password" << pass << dlog;
+				}
+				mainSocket.send(ret);
+			}
+			IF_COMMAND("A_LISTUSERS") {
+				Packet ret;
+				if (isAdmin) {
+					ret << "A_USERS";
+					auto& m = service->getCredenticalHandler().getUserPasswordHashedMapper();
+					ret << m.size();
+					for (auto& i : m)
+						ret << i.first << i.second << service->getSessionHandler().getSessionNoGenerate(i.first);
+					mlog << "[NetworkHandler] Users listed by administrative session" << dlog;
+				}
+				else
+					ret << "ADMINFAILED";
+				mainSocket.send(ret);
+			}
+			//IF_COMMAND("A_LISTSESSIONS") {
+			//	Packet ret;
+			//	if (isAdmin) {
+			//		ret << "A_SESSIONS";
+			//		auto& m = service->getSessionHandler().getUserSessionMapper();
+			//		ret << m.size();
+			//		for (auto& i : m)
+			//			ret << i.first << i.second;
+			//		mlog << "[NetworkHandler] User sessions listed by administrative session" << dlog;
+			//	}
+			//	else
+			//		ret << "ADMINFAILED";
+			//	mainSocket.send(ret);
+			//}
+			IF_COMMAND("A_DELETEUSER") {
+				Packet ret;
+				if (isAdmin) {
+					string name;
+					pack >> name;
+					service->deleteUser(name);
+					ret << "A_USERDELETED";
+					mlog << "[NetworkHandler] User \"" << name << "\" forcibly deleted by administrative session" << dlog;
+				}
+				else
+					ret << "ADMINFAILED";
+				mainSocket.send(ret);
+			}
+			IF_COMMAND("A_ADDUSER") {
+				Packet ret;
+				if (isAdmin) {
+					string name, newpass;
+					pack >> name >> newpass;
+					service->createUser(name, newpass);
+					ret << "A_USERADDED";
+					mlog << "[NetworkHandler] User \"" << name << "\" forcibly added by administrative session" << dlog;
+				}
+				else
+					ret << "ADMINFAILED";
+				mainSocket.send(ret);
+			}
+			IF_COMMAND("A_CHANGEUSER") {
+				Packet ret;
+				if (isAdmin) {
+					string name, newpass;
+					pack >> name >> newpass;
+					service->deleteUser(name);
+					service->createUser(name, newpass);
+					ret << "A_USERCHANGED";
+					mlog << "[NetworkHandler] User \"" << name << "\" forcibly changed by administrative session" << dlog;
+				}
+				else
+					ret << "ADMINFAILED";
+				mainSocket.send(ret);
+			}
+			IF_COMMAND("A_REMOVESESS") {
+				Packet ret;
+				if (isAdmin) {
+					string name;
+					pack >> name;
+					service->userLogout(name);
+					ret << "A_SESSREMOVED";
+					mlog << "[NetworkHandler] User session of \"" << name << "\" forcibly removed by administrative session" << dlog;
+				}
+				else
+					ret << "ADMINFAILED";
+				mainSocket.send(ret);
+			}
+			IF_COMMAND("A_ADDSESS") {
+				Packet ret;
+				if (isAdmin) {
+					string name;
+					pack >> name;
+					service->userLogout(name);
+					ret << "A_SESSADDED" << service->getSessionHandler().getSession(name);
+					mlog << "[NetworkHandler] User session of \"" << name << "\" forcibly added by administrative session" << dlog;
+				}
+				else
+					ret << "ADMINFAILED";
+				mainSocket.send(ret);
+			}
 		}
 		connected = false;
+		if (isAdmin) {
+			mlog << "[NetworkHandler] Administrative user from " <<
+				mainSocket.getRemoteAddress().toString() << ":" << mainSocket.getRemotePort() <<
+				" passively disconnected." << dlog;
+		}
 	}
 
 	void disconnect() {
@@ -135,6 +259,9 @@ private:
 	UserServiceHandler* service;
 	TcpSocket mainSocket;
 	bool connected, listening;
+
+	string adminPassHashed;
+	bool isAdmin;
 };
 
 /*
@@ -162,17 +289,17 @@ Client:
 class UserServer {
 public:
 
-	UserServer():listen(&UserServer::listenLoop, this), seekAndRemove(&UserServer::seekAndRemoveLoop, this) {}
+	UserServer() :listen(&UserServer::listenLoop, this), seekAndRemove(&UserServer::seekAndRemoveLoop, this) {}
 
 	const bool loadConfig(string filename) {
 		configFilename = filename;
-		mlog << Log::Info << "[Server] Config Loading: " << filename << defLog;
-		if(service.loadFromFile(filename) && option.loadFromFile(filename + ".option")) {
+		mlog << Log::Info << "[Server] Config Loading: " << filename << dlog;
+		if (service.loadFromFile(filename) && option.loadFromFile(filename + ".option")) {
 			processConfig();
 			return true;
 		}
 		else {
-			mlog << Log::Error << "[Server] Loading failed! Filename: " << filename << defLog;
+			mlog << Log::Error << "[Server] Loading failed! Filename: " << filename << dlog;
 			return false;
 		}
 	}
@@ -183,13 +310,14 @@ public:
 			autosaveTime = seconds(StringParser::toFloat(option.getContent("autosave-duration")));
 		else
 			autosaveTime = Time::Zero;
+		adminPassHashed = option.getContent("admin-pass-hashed");
 	}
 
 	const bool saveConfig(string filename) {
-		if(service.saveToFile(filename))
+		if (service.saveToFile(filename))
 			return true;
 		else {
-			mlog << Log::Error << "[Server] Saving failed! Filename: " << filename << defLog;
+			mlog << Log::Error << "[Server] Saving failed! Filename: " << filename << dlog;
 			return false;
 		}
 	}
@@ -202,9 +330,9 @@ public:
 
 	void listenLoop() {
 		isListening = true;
-		while(isListening) {
+		while (isListening) {
 			listeningHandler = new ServerNetworkHandler();
-			if(!listeningHandler->listen(port, service)) {
+			if (!listeningHandler->listen(port, service, adminPassHashed)) {
 				delete listeningHandler;
 				listeningHandler = NULL;
 				continue;
@@ -216,10 +344,10 @@ public:
 	}
 
 	void seekAndRemoveLoop() {
-		while(isRunning) {
+		while (isRunning) {
 			handlerLock.lock();
-			for(list<ServerNetworkHandler*>::iterator i = handlers.begin(); i != handlers.end();) {
-				if(!(*i)->isConnected()) {
+			for (list<ServerNetworkHandler*>::iterator i = handlers.begin(); i != handlers.end();) {
+				if (!(*i)->isConnected()) {
 					delete (*i);
 					i = handlers.erase(i);
 				}
@@ -236,24 +364,24 @@ public:
 	void stop() {
 		isListening = false;
 
-		if(listeningHandler != NULL)
+		if (listeningHandler != NULL)
 			listeningHandler->stopListening();
 
-		mlog << Log::Info << "[Server] Stopping server..." << defLog;
-		mlog << Log::Info << "[Server] Disconnecting clients..." << defLog;
+		mlog << Log::Info << "[Server] Stopping server..." << dlog;
+		mlog << Log::Info << "[Server] Disconnecting clients..." << dlog;
 
-		for(list<ServerNetworkHandler*>::iterator i = handlers.begin(); i != handlers.end();) {
+		for (list<ServerNetworkHandler*>::iterator i = handlers.begin(); i != handlers.end();) {
 			(*i)->disconnect();
 			delete (*i);
 			i = handlers.erase(i);
 		}
 		sleep(milliseconds(50));
 
-		mlog << Log::Info << "[Server] Saving config file..." << defLog;
+		mlog << Log::Info << "[Server] Saving config file..." << dlog;
 		service.saveToFile(configFilename);
 		sleep(milliseconds(50));
 
-		mlog << Log::Info << "[Server] Server stopped." << defLog;
+		mlog << Log::Info << "[Server] Server stopped." << dlog;
 
 		isRunning = false;
 	}
@@ -269,6 +397,7 @@ private:
 	Thread listen, seekAndRemove;
 
 	Time autosaveTime;
+	string adminPassHashed;
 
 	bool isRunning, isListening;
 	Uint16 port;
