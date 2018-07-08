@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#include <random>
 #include <mutex>
 #include <set>
 #include <map>
@@ -127,6 +128,8 @@ private:
 class UserSessionHandler {
 public:
 
+	UserSessionHandler() :randengine(random_device()()), dist(100000000000LL, 999999999999LL) {}
+
 	const bool loadFromFile(const string& filename) {
 		mlog << Log::Info << "[Session] Loading, file: " << filename << dlog;
 		AUTOLOCK(dataLock);
@@ -210,9 +213,10 @@ private:
 	const string _generateSession() {
 		string str;
 		while (true) {
-			str = "";
-			for (int i = 0; i < 12; i++)
-				str += '0' + rand() % 10;
+			//str = "";
+			//for (int i = 0; i < 12; i++)
+				//str += '0' + rand() % 10;
+			str = to_string(dist(randengine));
 			if (sessionsInUse.find(str) == sessionsInUse.end())
 				break;
 		}
@@ -234,6 +238,9 @@ private:
 	// <username, session>
 	map<string, string> sessionMapper;
 	set<string> sessionsInUse;
+
+	mt19937 randengine;
+	uniform_int_distribution<long long> dist;
 };
 
 
@@ -278,7 +285,7 @@ public:
 	const bool checkUserCredentials(const string& username, const string& passwordHashed) {
 		AUTOLOCK(dataLock);
 		mlog << Log::Info << "[UserService] UserCheck attempt by {" << username << "}" << dlog;
-		return cred.isUserVaild(username,passwordHashed);
+		return cred.isUserVaild(username, passwordHashed);
 	}
 
 	const bool createUser(const string& username, const string& passwordHashed) {
