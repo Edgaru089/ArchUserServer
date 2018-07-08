@@ -29,7 +29,7 @@ BOOL systemExitEventHandler(DWORD dwCtrlType) {
 
 #endif // SFML_SYSTEM_WINDOWS
 
-const string versionString = "1.2";
+const string versionString = "1.2.1";
 const string compileTime = string(__DATE__) + " " + string(__TIME__);
 
 ofstream logOut("latest.log");
