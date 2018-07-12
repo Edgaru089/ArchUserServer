@@ -11,21 +11,10 @@
 
 #include "Main.hpp"
 #include "LogSystem.hpp"
+#include "Uuid.hpp"
 
 using namespace std;
 
-//struct User {
-//	User() {}
-//	User(string userName, string passwordHashed) :
-//		username(userName), passwordHashed(passwordHashed) {}
-//
-//	const bool operator == (const User& right) const { return username == right.username&&passwordHashed == right.passwordHashed; }
-//	const bool operator != (const User& right) const { return !((*this) == right); }
-//	const bool operator < (const User& right) const { return username < right.username; }
-//	const bool operator > (const User& right) const { return username > right.username; }
-//
-//	string username, passwordHashed;
-//};
 
 class UserCredentialHandler {
 public:
@@ -128,15 +117,13 @@ private:
 class UserSessionHandler {
 public:
 
-	UserSessionHandler() :randengine(random_device()()), dist(100000000000LL, 999999999999LL) {}
-
 	const bool loadFromFile(const string& filename) {
 		mlog << Log::Info << "[Session] Loading, file: " << filename << dlog;
 		AUTOLOCK(dataLock);
 		ifstream in(filename);
-		string username, session;
+		string username;
+		Uuid session;
 		sessionMapper.clear();
-		sessionsInUse.clear();
 		int count;
 		if (!in) {
 			mlog << Log::Error << "[Session] File loading Failed! Filename: " << filename << dlog;
@@ -144,9 +131,9 @@ public:
 		}
 		in >> count;
 		for (int i = 1; i <= count; i++) {
-			in >> username >> session;
+			in >> username;
+			in >> session.sc1 >> session.sc2 >> session.sc3 >> session.sc4 >> session.sc5_high2 >> session.sc5_low4;
 			sessionMapper[username] = session;
-			sessionsInUse.insert(session);
 		}
 		mlog << Log::Info << "[Session] File loaded. " << count << " items in all." << dlog;
 		return true;
@@ -161,8 +148,11 @@ public:
 			return false;
 		}
 		fout << sessionMapper.size() << endl;
-		for (pair<string, string> i : sessionMapper) {
-			fout << i.first << " " << i.second << endl;
+		for (auto& i : sessionMapper) {
+			fout << i.first << " ";
+			fout << i.second.sc1 << " " << i.second.sc2 << " " << i.second.sc3 << " " << i.second.sc4 << " "
+				<< i.second.sc5_high2 << " " << i.second.sc5_low4;
+			fout << "\n";
 		}
 		fout.flush();
 		if (fout) {
@@ -175,72 +165,43 @@ public:
 		}
 	}
 
-	const string getSession(const string& username) {
+	Uuid getSession(const string& username) {
 		AUTOLOCK(dataLock);
-		map<string, string>::iterator iter = sessionMapper.find(username);
+		auto iter = sessionMapper.find(username);
 		if (iter != sessionMapper.end())
 			return iter->second;
 		else
-			return sessionMapper[username] = _generateSession();
+			return sessionMapper[username] = Uuid::get();
 	}
 
-	const string getSessionNoGenerate(const string& username) {
+	Uuid getSessionNoGenerate(const string& username) {
 		AUTOLOCK(dataLock);
-		map<string, string>::iterator iter = sessionMapper.find(username);
+		auto iter = sessionMapper.find(username);
 		if (iter != sessionMapper.end())
 			return iter->second;
 		else
-			return ""s;
+			return Uuid::nil();
 	}
 
 	const bool dismissSession(const string& username) {
 		AUTOLOCK(dataLock);
-		map<string, string>::iterator iter = sessionMapper.find(username);
+		auto iter = sessionMapper.find(username);
 		if (iter == sessionMapper.end())
 			return false;
 		else {
-			_releaseSession(iter->second);
 			sessionMapper.erase(iter);
 			return true;
 		}
 	}
 
 	// To change the contents of the mapper, use functions provieded above
-	const map<string, string>& getUserSessionMapper() { return sessionMapper; }
+	const map<string, Uuid>& getUserSessionMapper() { return sessionMapper; }
 
 private:
 
-	const string _generateSession() {
-		string str;
-		while (true) {
-			//str = "";
-			//for (int i = 0; i < 12; i++)
-				//str += '0' + rand() % 10;
-			str = to_string(dist(randengine));
-			if (sessionsInUse.find(str) == sessionsInUse.end())
-				break;
-		}
-		sessionsInUse.insert(str);
-		return str;
-	}
-
-	const bool _releaseSession(const string& session) {
-		set<string>::iterator iter = sessionsInUse.find(session);
-		if (iter == sessionsInUse.end())
-			return false;
-		else {
-			sessionsInUse.erase(iter);
-			return true;
-		}
-	}
-
 	mutex dataLock;
 	// <username, session>
-	map<string, string> sessionMapper;
-	set<string> sessionsInUse;
-
-	mt19937 randengine;
-	uniform_int_distribution<long long> dist;
+	map<string, Uuid> sessionMapper;
 };
 
 
@@ -259,15 +220,15 @@ public:
 		return cred.saveToFile(filename + ".credential") && sess.saveToFile(filename + ".session");
 	}
 
-	//Bool:   is login successful?
-	//string: user session if successful
-	const pair<bool, string> userLogin(const string& username, const string& passwordHashed) {
+	//Bool: is login successful?
+	//Uuid: user session if successful
+	const pair<bool, Uuid> userLogin(const string& username, const string& passwordHashed) {
 		AUTOLOCK(dataLock);
 		mlog << Log::Info << "[UserService] UserLogin attempt by {" << username << "}" << dlog;
 		if (!cred.isUserVaild(username, passwordHashed))
-			return pair<bool, string>(false, "");
+			return make_pair(false, Uuid());
 		else
-			return pair<bool, string>(true, sess.getSession(username));
+			return make_pair(true, sess.getSession(username));
 	}
 
 	const bool userLogout(const string& username) {
@@ -276,9 +237,9 @@ public:
 		return sess.dismissSession(username);
 	}
 
-	const bool checkUserSession(const string& username, const string& session) {
+	const bool checkUserSession(const string& username, const Uuid& session) {
 		AUTOLOCK(dataLock);
-		mlog << Log::Info << "[UserService] CheckUserSession attempt by {" << username << ", " << session << "}" << dlog;
+		mlog << Log::Info << "[UserService] CheckUserSession attempt by {" << username << ", {" << session.toString() << "}}" << dlog;
 		return session == sess.getSessionNoGenerate(username);
 	}
 

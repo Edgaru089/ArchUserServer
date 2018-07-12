@@ -81,7 +81,8 @@ public:
 				mainSocket.send(pack);
 			}
 			IF_COMMAND("CHECKSESSION") {
-				string username, session;
+				string username;
+				Uuid session;
 				pack >> username, session;
 				Packet out;
 				if (service->checkUserSession(username, session))
