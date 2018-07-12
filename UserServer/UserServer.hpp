@@ -57,7 +57,7 @@ public:
 			}
 			IF_COMMAND("LOGIN") {
 				string username, passwordHashed;
-				pair<bool, string> status;
+				pair<bool, Uuid> status;
 				pack >> username >> passwordHashed;
 				if ((status = service->userLogin(username, passwordHashed)).first) {
 					Packet out;

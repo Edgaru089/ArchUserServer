@@ -69,6 +69,7 @@ public:
 		sc4 = copy.sc4;
 		sc5_high2 = copy.sc5_high2;
 		sc5_low4 = copy.sc5_low4;
+		return *this;
 	}
 
 	string toString() const {
